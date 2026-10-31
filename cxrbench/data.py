@@ -38,11 +38,62 @@ def find_images(root: str | Path) -> pd.DataFrame:
     )
 
 
-def duplicate_report(df: pd.DataFrame) -> pd.DataFrame:
+def hash_images(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy of ``df`` with an MD5 content hash column ``h``."""
     hashes = [hashlib.md5(Path(path).read_bytes()).hexdigest() for path in df["path"]]
     out = df.copy()
     out["h"] = hashes
-    return out[out.duplicated("h", keep=False)]
+    return out
+
+
+def duplicate_report(df: pd.DataFrame) -> pd.DataFrame:
+    hashed = hash_images(df)
+    return hashed[hashed.duplicated("h", keep=False)]
+
+
+def duplicate_group_summary(hashed: pd.DataFrame) -> dict:
+    """Summarize exact-duplicate groups in a hash-annotated frame."""
+    groups = [group for _, group in hashed.groupby("h") if len(group) > 1]
+    return {
+        "groups": len(groups),
+        "files": int(sum(len(group) for group in groups)),
+        "conflicting_label_groups": int(
+            sum(group["y"].nunique() > 1 for group in groups)
+        ),
+    }
+
+
+def duplicate_cross_split_report(hashed: pd.DataFrame, split_seed: int) -> dict:
+    """Count exact-duplicate groups that span subsets of a clean split.
+
+    ``hashed`` must contain the ``h`` column produced by :func:`hash_images`.
+    """
+    labels = hashed["y"].to_numpy()
+    train, val, test = split_clean(labels, split_seed)
+    part = {int(i): "train" for i in train[:, 0]}
+    part.update({int(i): "val" for i in val[:, 0]})
+    part.update({int(i): "test" for i in test[:, 0]})
+    groups = [group for _, group in hashed.groupby("h") if len(group) > 1]
+    spanning = [
+        group for group in groups if len({part[int(i)] for i in group.index}) > 1
+    ]
+    train_test = [
+        group
+        for group in groups
+        if {"train", "test"} <= {part[int(i)] for i in group.index}
+    ]
+    test_with_train_duplicate = int(
+        sum(
+            sum(part[int(i)] == "test" for i in group.index)
+            for group in train_test
+        )
+    )
+    return {
+        "split_seed": split_seed,
+        "groups_spanning_subsets": len(spanning),
+        "train_test_groups": len(train_test),
+        "test_images_with_train_duplicate": test_with_train_duplicate,
+    }
 
 
 def load_images(
@@ -117,6 +168,25 @@ def split_augment_then_split(
         random_state=seed,
     )
     return items[train], items[val], items[test]
+
+
+def split_then_augment(
+    labels: np.ndarray, seed: int, n_variants: int = 4
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Protocol B' control: split source images first, then expand offline variants.
+
+    The training budget and test-item composition match
+    :func:`split_augment_then_split`, but no source image crosses a subset
+    boundary, so any B - B' difference isolates sibling overlap.
+    """
+    train, val, test = split_clean(labels, seed)
+
+    def expand(items: np.ndarray) -> np.ndarray:
+        return np.array(
+            [(int(i), variant) for i, _ in items for variant in range(n_variants)]
+        )
+
+    return expand(train), expand(val), expand(test)
 
 
 def sibling_overlap(train_items: np.ndarray, test_items: np.ndarray) -> float:

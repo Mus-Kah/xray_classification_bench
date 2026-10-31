@@ -26,4 +26,8 @@ quick_test: false
 run_ablation: true
 run_protocol_b: true
 protocol_b_epochs: 8
-protocol_b_seeds: [0]
+protocol_b_seeds: [0, 1, 2]
+run_protocol_b_prime: true
+protocol_b_prime_epochs: 8
+protocol_b_prime_seeds: [0, 1, 2]
+duplicate_split_seeds: [42, 1, 2, 3]

@@ -38,7 +38,11 @@ class Config:
     run_ablation: bool = True
     run_protocol_b: bool = True
     protocol_b_epochs: int = 8
-    protocol_b_seeds: List[int] = field(default_factory=lambda: [0])
+    protocol_b_seeds: List[int] = field(default_factory=lambda: [0, 1, 2])
+    run_protocol_b_prime: bool = True
+    protocol_b_prime_epochs: int = 8
+    protocol_b_prime_seeds: List[int] = field(default_factory=lambda: [0, 1, 2])
+    duplicate_split_seeds: List[int] = field(default_factory=lambda: [42, 1, 2, 3])
 
     def __post_init__(self) -> None:
         self.data_dir = str(self.data_dir)
@@ -47,11 +51,14 @@ class Config:
         self.seeds = list(self.seeds)
         self.head_mult_by = dict(self.head_mult_by)
         self.protocol_b_seeds = list(self.protocol_b_seeds)
+        self.protocol_b_prime_seeds = list(self.protocol_b_prime_seeds)
+        self.duplicate_split_seeds = list(self.duplicate_split_seeds)
         if self.quick_test:
             self.seeds = [0]
             self.epochs = 2
             self.run_ablation = False
             self.run_protocol_b = False
+            self.run_protocol_b_prime = False
             if not self.out_dir.endswith("_quicktest"):
                 self.out_dir = self.out_dir + "_quicktest"
 

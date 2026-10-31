@@ -13,15 +13,24 @@ import pandas as pd
 import torch
 from sklearn.metrics import classification_report, confusion_matrix
 
+from cxrbench.analysis import (
+    ensemble_agreement,
+    protocol_b_prime_comparison,
+    protocol_breakdown,
+    validation_selection_table,
+)
 from cxrbench.config import CLASSES, load_config
 from cxrbench.data import (
-    duplicate_report,
+    duplicate_cross_split_report,
+    duplicate_group_summary,
     find_images,
+    hash_images,
     load_images,
     sibling_overlap,
     source_overlap,
     split_augment_then_split,
     split_clean,
+    split_then_augment,
 )
 from cxrbench.evaluation import build_results_table
 from cxrbench.protocols import PAPER_ACC, PAPER_CI, PAPER_CM, PAPER_K, PAPER_N
@@ -49,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--no-ablation", action="store_true")
     parser.add_argument("--no-protocol-b", action="store_true")
+    parser.add_argument("--no-protocol-b-prime", action="store_true")
     parser.add_argument(
         "--cpu", action="store_true", help="Allow CPU execution (debugging only)."
     )
@@ -66,6 +76,7 @@ def main() -> None:
         "epochs": args.epochs,
         "run_ablation": False if args.no_ablation else None,
         "run_protocol_b": False if args.no_protocol_b else None,
+        "run_protocol_b_prime": False if args.no_protocol_b_prime else None,
     }
     cfg = load_config(args.config, **overrides)
     device = resolve_device(require_cuda=not args.cpu)
@@ -91,8 +102,24 @@ def main() -> None:
             "Split sizes will fall back to proportions."
         )
 
-    duplicates = duplicate_report(df)
-    print(f"Exact duplicate files: {len(duplicates)} | groups: {duplicates['h'].nunique()}")
+    hashed = hash_images(df)
+    duplicates = hashed[hashed.duplicated("h", keep=False)]
+    group_summary = duplicate_group_summary(hashed)
+    print(
+        f"Exact duplicate files: {len(duplicates)} | groups: {group_summary['groups']} | "
+        "groups with conflicting labels: "
+        f"{group_summary['conflicting_label_groups']}"
+    )
+    duplicate_audits = []
+    for split_seed in cfg.duplicate_split_seeds:
+        audit = duplicate_cross_split_report(hashed, split_seed)
+        duplicate_audits.append(audit)
+        print(
+            f"Duplicate audit split {split_seed:>2}: groups spanning >1 subset = "
+            f"{audit['groups_spanning_subsets']} | train&test groups = "
+            f"{audit['train_test_groups']} | test images with a train duplicate = "
+            f"{audit['test_images_with_train_duplicate']}"
+        )
     labels = df["y"].to_numpy()
 
     raw_images, clahe_images = load_images(
@@ -125,6 +152,17 @@ def main() -> None:
         print(
             "Protocol B test items with a sibling in train: "
             f"{sibling_overlap(items_b[0], items_b[2]):.1%}"
+        )
+
+    items_bp = None
+    if cfg.run_protocol_b_prime:
+        items_bp = split_then_augment(labels, cfg.split_seed)
+        print(f"Protocol B' sizes: {[len(part) for part in items_bp]}")
+        print(
+            "Protocol B' train/test source-image overlap: "
+            f"{source_overlap(items_bp[0], items_bp[2])} | "
+            "test items with a sibling in train: "
+            f"{sibling_overlap(items_bp[0], items_bp[2]):.1%}"
         )
 
     results_a = {}
@@ -235,6 +273,7 @@ def main() -> None:
         ablation_table.to_csv(cfg.out_path / "ablation.csv", index=False)
 
     protocol_b_summary = None
+    results_b = {}
     if cfg.run_protocol_b:
         assert items_b is not None
         print("\n=== Protocol B (augment-before-split reference protocol) ===")
@@ -254,6 +293,7 @@ def main() -> None:
                 augment=False,
                 tag="B",
             )
+            results_b[seed] = result
             accuracies_b.append(
                 float((result["probs_te"].argmax(1) == y_true_b).mean())
             )
@@ -287,6 +327,92 @@ def main() -> None:
             f"{protocol_b_summary['delta'] * 100:+.2f} points"
         )
 
+    protocol_b_prime_summary = None
+    if cfg.run_protocol_b_prime:
+        assert items_bp is not None
+        print("\n=== Protocol B' (split-then-augment control) ===")
+        model_name = cfg.models[0]
+        y_true_bp = labels[items_bp[2][:, 0]]
+        accuracies_bp = []
+        results_bp = {}
+        for seed in cfg.protocol_b_prime_seeds:
+            result = train_one(
+                cfg,
+                model_name,
+                seed,
+                items_bp,
+                clahe_images,
+                labels,
+                device,
+                epochs=cfg.protocol_b_prime_epochs,
+                augment=False,
+                tag="Bp",
+            )
+            results_bp[seed] = result
+            accuracies_bp.append(
+                float((result["probs_te"].argmax(1) == y_true_bp).mean())
+            )
+        common_seeds = [
+            seed for seed in cfg.protocol_b_prime_seeds if seed in results_b
+        ]
+        if common_seeds:
+            breakdown_b = protocol_breakdown(
+                results_b, items_b, labels, common_seeds
+            )
+            breakdown_bp = protocol_breakdown(
+                results_bp, items_bp, labels, common_seeds
+            )
+            protocol_b_prime_summary = protocol_b_prime_comparison(
+                acc_a, breakdown_b, breakdown_bp
+            )
+            protocol_b_prime_summary.update(
+                {
+                    "model": short_name(model_name),
+                    "protocol_b_prime_runs": accuracies_bp,
+                    "common_seeds": common_seeds,
+                }
+            )
+            for label, breakdown in (("B", breakdown_b), ("B'", breakdown_bp)):
+                for key in ("overall", "original", "augmented"):
+                    values = np.round(breakdown["runs"][key], 2)
+                    print(
+                        f"{label:2s} {key:9s} mean {breakdown['mean'][key]:6.2f} "
+                        f"+- {breakdown['std'][key]:.2f}   {values}"
+                    )
+            print(
+                f"Leakage effect B - B': "
+                f"{protocol_b_prime_summary['leakage_effect_points']:+.2f} points "
+                "| on test originals only: "
+                f"{protocol_b_prime_summary['leakage_effect_originals_points']:+.2f}"
+            )
+            print(
+                "Budget/test-composition effect B' - A: "
+                f"{protocol_b_prime_summary['budget_test_composition_effect_points']:+.2f} points"
+            )
+        else:
+            print(
+                "Protocol B results are unavailable; B' was trained but the "
+                "leakage contrast was skipped."
+            )
+
+    validation_table = validation_selection_table(
+        cfg, results_a, items_a[1], labels
+    )
+    print("\n=== Architecture selection on the validation split ===")
+    print(validation_table.round(2).to_string(index=False))
+
+    agreement = ensemble_agreement(
+        ensemble_probs, y_true, short_name(cfg.models[0])
+    )
+    print(
+        "\nEnsemble agreement: identical predictions on "
+        f"{agreement['identical_fraction']:.4f} of test images | "
+        f"disagreements {agreement['disagreements']} | "
+        f"correct in both {agreement['correct_in_both']} | "
+        f"only reference correct {agreement['only_reference_correct']} | "
+        f"only combined correct {agreement['only_combined_correct']}"
+    )
+
     summary = {
         "protocol_a": (
             "Stratified split of original images; on-the-fly augmentation "
@@ -300,6 +426,11 @@ def main() -> None:
         "results": json_safe_records(table.drop(columns=["note"])),
         "ablation": ablation_rows,
         "protocol_b": protocol_b_summary,
+        "protocol_b_prime": protocol_b_prime_summary,
+        "duplicate_groups": group_summary,
+        "duplicate_audits": duplicate_audits,
+        "validation_selection": json_safe_records(validation_table),
+        "ensemble_agreement": agreement,
     }
     save_json(cfg.out_path / "summary.json", summary)
     print(f"\nSaved results to {cfg.out_path}")

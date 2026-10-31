@@ -99,7 +99,7 @@ python train.py \
   --epochs 20
 ```
 
-Use `--no-ablation` or `--no-protocol-b` to skip the optional experiments, and `--cpu` only for debugging.
+Use `--no-ablation`, `--no-protocol-b`, or `--no-protocol-b-prime` to skip the optional experiments, and `--cpu` only for debugging.
 
 ## Protocols
 
@@ -119,6 +119,24 @@ This protocol guarantees that no source image appears in both training and test 
 - Train without additional on-the-fly augmentation.
 
 This mirrors the augment-before-split design used in some published studies. Because variants of the same source image can land in different splits, Protocol B results are not directly comparable to Protocol A. The code reports the share of test items that have a sibling from the same source image in the training set, so the difference is visible and documented.
+
+### Protocol B': split-then-augment control
+
+- Split the original source images first (same clean split as Protocol A).
+- Expand each subset into four offline augmented variants.
+- Train without additional on-the-fly augmentation, using the same budget and test-item composition as Protocol B.
+
+B' keeps the sibling overlap of B out of the split. The reported `B - B'` difference therefore isolates the effect of sibling overlap, while `B' - A` captures the remaining budget/test-composition effect.
+
+### Additional audit analyses
+
+`train.py` and `evaluate.py` also report:
+
+- Exact-duplicate groups that span train/validation/test for the configured split seeds.
+- Architecture selection on the validation split (not on test).
+- Agreement between the first model's seed-ensemble and the all-model ensemble.
+
+Results are written to `summary.json` and `evaluation.json`.
 
 ### Comparison with the published baseline
 
@@ -159,9 +177,10 @@ The Protocol B difference is descriptive; the two protocols use different splits
 .
 ├── cxrbench/
 │   ├── __init__.py
+│   ├── analysis.py       # Validation selection, ensemble agreement, protocol contrasts
 │   ├── augment.py        # GPU augmentation, normalization, offline augmentation
 │   ├── config.py         # Dataclass configuration and YAML loader
-│   ├── data.py           # Discovery, caching, splits, and the in-memory loader
+│   ├── data.py           # Discovery, caching, splits, duplicates, and the in-memory loader
 │   ├── evaluation.py     # Result rows, bootstrap CIs, and classification summaries
 │   ├── explain.py        # Grad-CAM
 │   ├── models.py         # timm model construction and inference
@@ -176,6 +195,7 @@ The Protocol B difference is descriptive; the two protocols use different splits
 ├── results/
 │   └── .gitkeep
 ├── tests/
+│   ├── test_analysis.py
 │   ├── test_data.py
 │   └── test_protocols.py
 ├── train.py

@@ -1,6 +1,10 @@
 import numpy as np
 
-from cxrbench.data import split_augment_then_split, split_clean
+from cxrbench.data import (
+    split_augment_then_split,
+    split_clean,
+    split_then_augment,
+)
 from cxrbench.protocols import PAPER_ACC, PAPER_K, PAPER_N
 
 
@@ -25,3 +29,16 @@ def test_augment_then_split_items_are_unique():
     assert total == len(labels) * 4
     items = {(int(i), int(v)) for i, v in np.vstack([train, val, test])}
     assert len(items) == total
+
+
+def test_split_then_augment_keeps_sources_disjoint():
+    labels = np.repeat([0, 1, 2], [1000, 1000, 1000])
+    train, val, test = split_then_augment(labels, seed=42)
+    assert len(train) + len(val) + len(test) == len(labels) * 4
+    train_sources = set(train[:, 0])
+    test_sources = set(test[:, 0])
+    val_sources = set(val[:, 0])
+    assert not train_sources & test_sources
+    assert not val_sources & test_sources
+    assert not train_sources & val_sources
+    assert len(test_sources) * 4 == len(test)
