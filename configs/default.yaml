@@ -1,0 +1,29 @@
+data_dir: data
+out_dir: results
+image_size: 224
+
+models:
+  - convnext_tiny.fb_in22k_ft_in1k
+  - tf_efficientnetv2_s.in21k_ft_in1k
+  - swin_tiny_patch4_window7_224.ms_in22k_ft_in1k
+
+seeds: [0, 1, 2, 3, 4]
+split_seed: 42
+
+epochs: 20
+batch_size: 32
+lr: 0.0001
+head_mult: 10.0
+head_mult_by: {}
+weight_decay: 0.05
+label_smoothing: 0.1
+ema_decay: 0.99
+aug_rotation: 15
+tta: true
+
+quick_test: false
+
+run_ablation: true
+run_protocol_b: true
+protocol_b_epochs: 8
+protocol_b_seeds: [0]

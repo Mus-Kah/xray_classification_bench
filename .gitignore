@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+env/
+.env
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Data and experiment outputs
+data/*
+!data/README.md
+results/*
+!results/.gitkeep
+results_quicktest/
+*.pkl
+*.pt
+*.npz
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
