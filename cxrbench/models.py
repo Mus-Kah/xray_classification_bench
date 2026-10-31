@@ -8,6 +8,19 @@ import torch.nn as nn
 from .augment import prep
 
 
+def count_macs(
+    name: str, image_size: int = 224, num_classes: int = 3
+) -> float:
+    """Return multiply-accumulate operations in billions for one forward pass."""
+    from fvcore.nn import FlopCountAnalysis
+
+    model = timm.create_model(
+        name, pretrained=False, num_classes=num_classes
+    ).eval()
+    dummy = torch.randn(1, 3, image_size, image_size)
+    return float(FlopCountAnalysis(model, dummy).total() / 1e9)
+
+
 def make_model(
     name: str,
     num_classes: int = 3,

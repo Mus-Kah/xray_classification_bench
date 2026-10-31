@@ -14,6 +14,7 @@ The project provides:
 - Bootstrap 95% confidence intervals, macro F1, confusion matrices, and per-class recall.
 - Ablation of CLAHE and training-time augmentation.
 - Grad-CAM examples for the ConvNeXt-T model.
+- Parameter counts and multiply-accumulate operations (MACs) for every configured backbone.
 - Cached result files so interrupted runs can resume.
 
 ## Dataset
@@ -88,6 +89,12 @@ Generate Grad-CAM examples (seed 0 of the first model):
 python gradcam.py --config configs/default.yaml
 ```
 
+Report model complexity (MACs for one forward pass at the configured input size):
+
+```bash
+python flops.py --config configs/default.yaml
+```
+
 Useful overrides:
 
 ```bash
@@ -100,6 +107,10 @@ python train.py \
 ```
 
 Use `--no-ablation`, `--no-protocol-b`, or `--no-protocol-b-prime` to skip the optional experiments, and `--cpu` only for debugging.
+
+## Model complexity
+
+`flops.py` builds each configured model without pretrained weights and reports multiply-accumulate operations (MACs) for a single forward pass at the configured image size. Counts are computed with [`fvcore`](https://github.com/facebookresearch/fvcore) and written to `flops.csv` in the output directory. Use `--models` to override the configured backbone list.
 
 ## Protocols
 
@@ -183,7 +194,7 @@ The Protocol B difference is descriptive; the two protocols use different splits
 │   ├── data.py           # Discovery, caching, splits, duplicates, and the in-memory loader
 │   ├── evaluation.py     # Result rows, bootstrap CIs, and classification summaries
 │   ├── explain.py        # Grad-CAM
-│   ├── models.py         # timm model construction and inference
+│   ├── models.py         # timm model construction, MAC counting, and inference
 │   ├── protocols.py      # Published reference numbers
 │   ├── training.py       # Single training run with EMA, AMP, and cosine schedule
 │   ├── utils.py          # Seeding, device resolution, JSON helpers
@@ -201,6 +212,7 @@ The Protocol B difference is descriptive; the two protocols use different splits
 ├── train.py
 ├── evaluate.py
 ├── gradcam.py
+├── flops.py
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── LICENSE
